@@ -1,0 +1,192 @@
+太好了—我把从“更好的动机”开始到现在的所有关键结论与决定，整理成一份**阶段性·完整方案 v2**。这版可直接作为论文与项目蓝图；我也把你喜欢的“一句话”式文案穿插进来（已按我们后续修正过的更严谨表述）。
+
+---
+
+# 一句话（可放引言首段）
+
+> **我们将增量学习中的参数更新视为“资格迹 × 稀疏门控 × 有限状态转移”的事件驱动过程（SFS-BTSP），并在此框架下给出容量阈值、稳定–可塑反演律与信息预算下界；bit 只是 $Q{=}2$ 的清晰特例。**
+
+---
+
+# 0. 研究动机（现实困境 → 我们的主张）
+
+**现实困境**
+
+* 增量学习的“稳定–可塑”矛盾，本质来自**延迟的全局信号**（奖励/任务切换/平台电位）与**局部瞬时的前突触事件**的错位。常规连续优化把这种“事件触发、延迟巩固”抹平，难以解释容量断崖与突发遗忘，也缺乏**可反演**的控制律。
+
+**核心主张**
+
+* 采用 BTSP 的三因子结构：**资格迹（短/长窗）× 分支门控（稀疏）× 随机转移核**，抽象成**有限状态随机突触（SFS）**；在此之上给出**可计算的任务极限 $C^\*)**、**目标遗忘 \(\varepsilon_0$ → 可塑率**的**反演律**，以及信息论的**同阶下界**，并以一个**可插拔记忆层**在多种 baseline 中验证**普适性**。
+
+---
+
+# 1. 统一模型：SFS-BTSP（含 BTSP 特例）
+
+* **状态**：每突触 $S_i \in \{0,1,\dots,Q-1\}$；$Q{=}2$ 即二值 bit。
+* **编码**：样本被映射为稀疏二值码 $x\in\{0,1\}^N$，激活率 $p_{\rm pre}$（Top-k 或伯努利）。
+* **资格迹**：$e_i\leftarrow \beta e_i$；若 $x_i{=}1$ 则 $e_i\leftarrow 1$。
+
+  * 可选 **STC**：短窗标签 $T$（$\tau_{\text{tag}}$）× 长窗资格迹（$\tau_e$）。
+* **分支门控**：分支 $b$ 以 $g_b\sim\mathrm{Bernoulli}(p_{\text{gate},b})$ 开启（平台电位）。
+* **转移核**：若 $g_{b(i)}{=}1 \wedge $（触发条件成立），按核 $K_Q$ 使 $S_i$ 随机跃迁。
+
+  * $Q{=}2$：BTSP 的“随机翻转”（可含奖惩偏置）；
+  * $Q{>}2$：邻位随机游走/直跳极端（上、下界夹逼）。
+* **读出**：哈明/布尔点积（popcount）得记忆分数，z-score 标定后与主 logits 按温度 $T$ 线性融合。
+* **调控**：Homeostasis 调 $p_{\text{gate},b}$；可选**阈值滑动** $\theta_b$；可选**分支协作核**（邻域平滑）。
+
+**假设盒（正文）**
+
+* 外生门控（泊松/伯努利，平稳）；小 $p_{\text{flip}}$ 稀疏区；读出固定为“哈明/点积 + 温度融合”；
+* 特征相关性以**有效自由度**吸收（下节定义 $N_{\text{eff}}$）。
+
+---
+
+# 2. 关键量与可反演公式（Q=2 主线；Q>2 附录夹逼）
+
+* **有效自由度（相关性修正）**
+
+  $$
+  \boxed{N_{\text{eff}}=\frac{(\mathrm{tr}\,\Sigma)^2}{\|\Sigma\|_F^2}},\quad \Sigma=\mathrm{Cov}(x)
+  $$
+* **有效时间窗** $T_{\text{eff}}=\tau_e \ln(1/\theta)$（步）。
+* **单位翻转率（Q=2）**
+
+  $$
+  p_{\text{flip}}\approx \frac{p_{\rm pre}}{2}\Big(1-e^{-\,p_{\text{gate}} T_{\text{eff}}}\Big)
+  $$
+* **稳定—可塑反演律（独立/Poisson 化近似）**
+
+  $$
+  \varepsilon(M)=\tfrac12\Big(1-(1-2p_{\text{flip}})^M\Big)
+  \ \Rightarrow\
+  \boxed{p_{\text{gate}}(M)= -\frac{1}{T_{\text{eff}}}\ln\!\Big(1-\frac{2p^\star_{\text{flip}}}{p_{\rm pre}}\Big)}
+  $$
+
+  其中 $p^\star_{\text{flip}}=\frac{1-(1-2\varepsilon_0)^{1/M}}{2}$。
+  **弱相关修正**：$\varepsilon(M)\le \tfrac12(1-(1-2\xi p_{\text{flip}})^M)$，$\xi\in(0,1]$ 由相关结构估计（保守上界）。
+* **可分性阈（读出一致、含 $\rho$ 遮挡）**
+
+  $$
+  \boxed{N_{\text{eff}}\,p_{\rm pre}(1-\rho)\ \ge\ \frac{\ln(L/\delta)}{g_Q(\varepsilon_0)}}
+  $$
+
+  * $L$：竞争原型数（已见类数−1）；
+  * **Q=2 显式**：$g_2(\varepsilon)=\frac{(1-2\varepsilon)^2}{8}$；
+  * **Q>2**：给邻位游走/直跳极端两核的上下界 $g_Q^{\text{(slow/fast)}}$（附录）。
+* **信息预算/熵流下界（D 线）**
+  每次门控贡献互信息 $\le \kappa_Q$ ⇒ 累积 $I\le \kappa_Q \eta t$。由 Fano/Le Cam 得
+
+  $$
+  \boxed{\mathcal R^\star \ \ge\ f(\kappa_Q\,\eta\,t,\ L)}
+  $$
+
+  显示风险的**同阶下界**与门控率 $\eta$ 成正比；我们采用的“迟滞阈+STC+Homeostasis”策略达到**同阶最优**（附录说明构造）。
+
+---
+
+# 3. “任务极限”可测协议（解决“曲线平滑看不到断崖”）
+
+* **极限定义**
+
+  $$
+  \boxed{C^\*(\varepsilon_0,\delta,\rho)=\max M\ \text{s.t.}\ \Pr[\text{旧类错误率}\le \varepsilon_0]\ge 1-\delta}
+  $$
+* **归一化负载曲线**（主图）
+  估 $\hat C$（由阈值式）→ 横轴 $\lambda=M/\hat C$，纵轴 Last-ACC 与 BWT；用 Kneedle/两段线拟合找拐点 → 实测 $C^\*$。
+* **ε-control 反演**
+  给定 $\varepsilon_0$ 与 $M$ 反解 $p_{\text{gate}}(M)$，画“旧类错误率 vs $M$”与理论带，首次越界即 $C^\*$。
+* **裕度/生存分析**
+  popcount-margin 的低分位穿 0 点、或 Kaplan–Meier 中位存活任务数，也给出稳健 $C^\*$。
+
+**一句话（可写论文）**
+
+> “在强 PTM 表征下，性能常呈平滑下降；我们用**归一化负载**与**ε-control 反演**把边界显性化，得到**可复现的容量读数**。不同方法在 $\lambda\!\approx\!1$ 对齐，嵌入本记忆层后曲线向右平移。”
+
+---
+
+# 4. 工程实现（可插模块 + 参考管线）
+
+**首选交付**：**模块化插件** + **最小参考实现**
+
+* **插件 API**
+
+  ```python
+  class BTSPMemory(nn.Module):
+      def write(self, x_bits: Bool[B,N], y: Long[B], mod:int=0): ...
+      def retrieve(self, x_bits: Bool[B,N]) -> Tensor[B,C]  # 已做 z-score & 温度
+      def set_gate_policy(self, cfg|callable): ...          # 解析式/自适应
+      def homeostasis_step(self): ...
+      def bytes_per_class(self)->int: ...
+  ```
+* **接入三行**
+  `feat = backbone(x)` → `x_bits = proj_bin(feat)` → `logits = fuse(base_logits, btsp.retrieve(x_bits), α,T)`
+* **参考管线（PILOT 已接通）**
+  ViT 特征（冻结/少量微调）→ D→N 投影（正交）→ Top-k 二值化 → **BTSP 写入（CPU/FP16, no-grad）** → popcount 读出 + 温度融合；两路前向 + AMP；缓存 $W$；资格迹/门控在 CPU；不 deep-copy 模型。
+
+**可选神经机制开关（生物味更强）**
+
+* **STC 双窗**（短标签 × 长资格迹）：时间窗曲线为双边/单边指数（非高斯）；FWHM 给 $\ln 2$ 公式。
+* **分支内协作核**（邻域平滑 $ \tilde e = \alpha e + (1-\alpha)\mathrm{mean}_{\mathcal N}$）。
+* **阈值滑动** $\theta_b$（分支元可塑）。
+* （附录）异突触自清理 / engram 共分配（本版先不默认开启）。
+
+---
+
+# 5. 评测设计（“极限为主，表格从简”）
+
+**协议**：CIFAR-100（10×10），ImageNet-R（25×4），exemplar-free；亦设**等资源契约**（等字节/显存/时延）。
+**基线**：Finetune, L2P, DualPrompt, CODA-Prompt；**Occam 组**：EMA 原型、EWC/SI、kNN+PQ、Bloom/位图、Hopfield（资源相当）。
+**指标**：$C^\*$、BWT 斜率、ε-control 覆盖率、APB（accuracy per byte）、显存峰值、时延/能耗、popcount-margin 曲线。
+**主图**：
+
+1. **ε-control**（理论带覆盖；给 $\varepsilon_0, M$ 反演 $p_{\text{gate}}$）
+2. **容量断崖（归一化负载）**（$\lambda$ 对齐 + Kneedle 拐点）
+3. **STC 时间窗**（指数窗卷积的左右半高宽）
+   **表**：等资源的 Avg/Last ACC、BWT、APB/显存/时延。
+
+---
+
+# 6. “模块化 vs 新方法”的定位
+
+* **主路线**：通用**插件化 SFS-BTSP 记忆层**（理论 + 实验 + 融合示例），证明**普适性**；
+* **保留**：一个**纯 BTSP 参考管线**用于三张机制图与消融；不把“刷 SOTA”当主目标。
+
+---
+
+# 7. 审稿人异议的预案（Occam 基线 + 反事实消融）
+
+* **更简单也能做？** → 等资源契约 + 极限/ε-control/信息预算三张图；对照 EMA 原型/EWC/kNN+PQ 等，展示**无可反演控制律**与**机制预测缺席**。
+* **不是 bit 就行？** → 我们是 **SFS（Q-态）**，bit 只是 $Q{=}2$；附录给 $Q{=}3$ 的上下界与实证，规律一致。
+* **拿掉门控/资格迹/随机翻转会怎样？** → 反事实消融：失去 ε-control/时间窗/对齐的容量断崖。
+
+---
+
+# 8. 逼出极限的“应力旋钮”（保证测得到）
+
+* 降低 $N, p_{\rm pre}$ 或提高遮挡 $\rho$（并报告 $N_{\text{eff}}$）；
+* 增 $p_{\text{gate}}$（按反演律在安全带内扫描）、短 $T_{\text{eff}}$；
+* 冻结骨干、降低分辨率；
+* 高冲突类排序以加速触边。
+  → 用**归一化负载**与**拐点检测**读 $C^\*$，即便曲线平缓也可稳定测出。
+
+---
+
+# 9. 时间表（3 周打样）
+
+* **Week 1**：插件 API 稳定；ε-control & 断崖 & 时间窗 三图（CIFAR-100，多种子）。
+* **Week 2**：DualPrompt/CODA-Prompt 融合（等资源）；Occam 基线；记录 $N_{\text{eff}}$/margin。
+* **Week 3**：定理写作（Thm 1–3 与假设框）、Q>2 上下界、附录消融；清理代码与复现实脚本。
+
+---
+
+# 10. 最小实施清单（落地必做）
+
+* 训练侧：**两路前向 + AMP**（BTSP 写入 no-grad/CPU/FP16；只训头/投影）；缓存 $W$；冻结骨干；
+* 记录器：$N_{\text{eff}}$、$p_{\text{gate}}$、分支占用 & flips/step、$W$ 尺寸、popcount-margin；
+* 评测脚本：**归一化负载 + Kneedle**、**ε-control 反演**、**STC 时间窗拟合**；
+* 文档：等资源契约与数据卡（种子、配置、曲线脚本）。
+
+---
+
+如果你愿意，我可以把**评测脚本模板**（归一化负载+Kneedle、ε-control 反演、时间窗拟合）在新线程里直接贴出（按你现有变量名写），你拎走即可跑第一批图。

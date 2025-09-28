@@ -1,0 +1,127 @@
+# 方案 v3（基于方案 v2＋形态 A）
+
+## BTSP 启发的“可控遗忘”增量学习：以 ε-SLA 为核心的评估与控制协议
+
+### 一句话
+
+把“旧类误差上限 ε（SLA）”提升为一等约束，在**任务边界**用 BTSP 记忆器的事件级门控（(p_{\text{gate}})、(T_{\text{eff}})）做**闭环反演控制**，并在**等预算合同**（FLOPs / Bytes / 延迟）下评测**覆盖率 / 偏差 / 容量拐点**，形成可计算、可控、可复现的 CIL 协议。该定位与“预算化 OCL、PTM 简化范式、受约束学习”的趋势一致，但把“被控量”直接落在**旧类误差**与**事件级门控**上，这是当前文献少见的系统化做法（对照：预算化 OCL与对偶/受约束 CL）。([arXiv][1])
+
+---
+
+## 1. 契约（Scope & Assumptions）
+
+* **形态**：A（analysis-only）。训练期**不融合**、不让 BTSP 参与反传；BTSP 写入在 `no_grad` 下。评测期才做 `fused = α·base + (1−α)·btsp`。
+* **SLA**：旧类误差阈值 (\varepsilon_0 \in {3%,5%,8%})，在**固定验证集**、**旧类并集（1..t−1）**、**系统最终输出（fused）**口径评估。
+* **等预算合同**：统一报告与约束 FLOPs、Bytes、Latency；特别记录 APB（Accuracy/Byte）、翻转数 flips、占用率 occupancy。参考“预算化 OCL”把 FLOPs/Bytes 当一等公民做公平比较。([arXiv][1])
+* **PTM 场景**：冻骨干或极少参数更新，遵循近两年“PTM + 简洁读出/Adapter 更稳”的共识；我们仅在**评估/控制层**工作，天然兼容。([OpenReview][2])
+
+---
+
+## 2. 控制律（任务级闭环）
+
+**被控量**：(\varepsilon_{\text{old}}(t)=1-\mathrm{ACC}_{\text{old}}(t))（任务 t 结束后测）。
+
+**反演目标**：给定 (\varepsilon_0)，求小步可达的 ((p_{\text{gate}}, T_{\text{eff}}))，使 (\varepsilon_{\text{old}}(t+1)) 贴近 (\varepsilon_0)，且满足资源护栏。
+
+**调节优先级**：
+
+1. 若 (\varepsilon_{\text{old}}>\varepsilon_0+\delta) 且资源允许，**先小步增 (T_{\text{eff}})**（延长可塑窗，抑制占用抖动）；
+2. 再在安全区内微调 (p_{\text{gate}})（比例＋绝对双钳制，Δcap = max(0.5·p, 2e−3)）。
+3. 若 (|\varepsilon_{\text{old}}-\varepsilon_0|\le\delta)（δ≈0.5–1%）：**不调**（滞回带）；误差信号用 EMA(γ≈0.7) 低通。
+
+**可达性（Achievability）硬护栏**：候选 ((p_{\text{gate}},T_{\text{eff}})) 必须同时满足
+
+* 预测/上轮统计的 **global_occ_next ≤ τ_{occ}^{high}**（含滞回 0.11–0.13）；
+* **E[flips/task] ≤ F_{max}**；**APB ≥ APB_{min}**；**Latency ≤ L_{max}**；
+  不满足→`achievable=False`，回退到 **持平策略**（保持 (p) 不变，仅允许小步 +(T_{\text{eff}})），并标注原因码（`occ_cap_hit / flips_cap_hit / apb_cap_hit / latency_cap_hit / coverage_low`）。
+
+> 对比相关：已有“预算化 OCL”给出了公平的**预算坐标**，但未将“**误差本身**”作为被控量闭环；对偶/受约束 CL将“不遗忘”写成约束并用乘子法，但多在**回放/参数**端执行。我们把**旧类误差**上升为**系统 SLA**，并在**事件门控**侧执行，这一点与现有工作存在显著差异。([arXiv][1])
+
+---
+
+## 3. 评测指标与主图（论文主结果）
+
+1. **ε-control 覆盖/偏差**：
+
+   * Coverage（达成率）：(\mathbb{1}[\varepsilon_{\text{old}}\le\varepsilon_0]) 的任务占比；
+   * RMSE：沿任务轴的控制偏差均方根。
+2. **λ-坐标容量曲线 & (C^*)**：在等预算与固定 ε 档下，画**负载坐标**（可用占用、翻转率或估计的 (N_{\text{eff}}) 代理）与性能的前沿；**以拐点 (C^*)** 度量承载极限。
+3. **等预算前沿**：APB（Accuracy/Byte）、Accuracy/flip、Accuracy/ms 的 Pareto 曲线。
+4. **顺序鲁棒性**：多顺序/多种子下的方差与覆盖率带宽。
+
+> 这些评测维度呼应近两年“等预算、公平比较、顺序鲁棒与可解释诊断”的趋势。([arXiv][1])
+
+---
+
+## 4. 实验设计（最小强度即可支撑 ICML 级证据）
+
+* **数据 / 骨干**：CIFAR-100/CUB/mini-ImageNet；PTM（ViT-B/16 或 ResNet-50）+ 冻骨干 + 简单读出（SimpleCIL/原型）。([OpenReview][2])
+* **协议**：无回放或固定外存；等 FLOPs/Bytes/Latency；ε 档 3/5/8%。
+* **对照**：
+
+  * 固定 p / 贪吃写入 / ε-control（对比“可控”的必要性）；
+  * **规则替换**：同样控制律下用 Hebbian-EMA / Random-flip 替代 BTSP 翻转（验证“BTSP 记忆器”是主因）；
+  * PTM 范式对照：与 SAFE/GACL/简单线性头在**同 ε 档**与**等预算**下比较 (C^*) 与 APB（我们是“评估/控制层”，非替代它们）。([NeurIPS][3])
+* **报表**：每 ε 档 3 图（覆盖/λ-C*/前沿）＋ 1 表（顺序鲁棒/资源合规/计划执行率）。
+
+---
+
+## 5. 工程落地（lamda_pilot｜A 形态）
+
+* **测量口径唯一化**：`eps_actual = 1 - ACC_old/100`，来源=**固定验证集 + 旧类并集 + fused 输出**。
+* **闭环管线**：`after_task(t) → 反演/护栏/计划 → 持久化 plan → before_task(t+1) 读取并小步执行`（失败→标记 `fallback_*` 并保持 (p)）。
+* **护栏**：`p ∈ [p_min=0.006, p_cap=0.05]`；Δcap = max(0.5·p, 2e−3)；占用滞回 0.11–0.13；先动 (T_{\text{eff}})、再动 p。
+* **日志（任务级必须项）**：`target_eps0, eps_pred, eps_actual, coverage, rmse, p_gate_cur, p_gate_next, T_eff_cur/next, flips_total, global_occ, bytes_btsp, APB, latency_ms, plan_source, flags, class_range, M, p_pre`。
+* **健壮性**：统一 JSON 安全序列化（numpy 标量→Python 标量）；计划持久化到 checkpoint 并恢复。
+* **评测期 α**：`α_eval` 固定 0.7–0.8 或启用 `adaptive_alpha(z_mu)`；只影响评估融合，不影响训练。
+
+---
+
+## 6. 预期贡献（写在论文里）
+
+* **协议贡献**：把**旧类误差 ε（SLA）**作为被控量，给出**任务级闭环**与**资源可达护栏**，在**等预算合同**下提供覆盖/偏差/容量曲线与前沿；这是从“刷分”转向“比极限、比控制、比效率”的**标准化评测蓝图**。([arXiv][1])
+* **方法学贡献**：用**BTSP 的事件级记忆写入**（资格迹 + 二值翻转）承载“可控遗忘”，并以**控制律**把工程指标（ε/APB/占用）串成闭环；与对偶/受约束 CL、PTM 简化范式互补。([OpenReview][4])
+* **分析贡献**：在 λ-坐标下读出 (C^*) 的可复现实证；顺序鲁棒与资源合规率作为新维度。
+
+---
+
+## 7. 与相关工作的关系（差异化定位）
+
+* **预算化 OCL**（统一 FLOPs/Bytes 比较）：我们**继承**其公平性，但进一步把**误差**作为**被控量**闭环执行。([arXiv][1])
+* **对偶/受约束 CL**：它从优化角度处理“无遗忘”约束，多在回放/参数端；我们在**外存记忆 + 事件门控**端执行“误差约束”，强调**任务级闭环与资源可达**。([OpenReview][4])
+* **PTM 简化范式/SAFE**：它们聚焦**稳定与简化**的参数更新；我们提供**上层控制/诊断协议**，可叠加在它们之上进行**等预算**对比。([NeurIPS][3])
+* **解析式/无回放（GACL）**：强调可分析闭式解；我们在**评估/控制层**给出**可证伪**的闭环指标与容量读数，二者可并行对照。([OpenReview][5])
+* **生物/可塑性中的“可控遗忘”**：SNN/神经调质已有“controlled forgetting/稳态可塑性”思路；我们把它工程化为 ε→门控/窗长的系统闭环。([Frontiers][6])
+
+---
+
+## 8. 风险与缓解
+
+* **闭环不稳/不触发**：启用滞回＋EMA 低通；可达门槛初期放宽到“最小 1 点覆盖”；计划持平回退。
+* **资源爆/纯门控限幅**：三重护栏（占用/翻转/APB/延迟）；优先调 (T_{\text{eff}})。
+* **BTSP 被误解为“trick”**：做**规则替换**与**调度替换**两组消融，证明“记忆器是主因，控制壳是可用性”。
+* **PTM 偏置**：多骨干/多数据集 + 顺序/种子方差报告，避免偶然性。
+* **与现有工作重叠**：在引言明确“误差作为被控量的**事件级闭环** + **等预算可达**”这一新组合；并在相关工作节实证区分。([arXiv][1])
+
+---
+
+## 9. 可交付里程碑（最小三周版）
+
+* **W1**：闭环工程打通（JSON 安全、计划持久化、achievability 原因码、滞回＋EMA、优先 (T_{\text{eff}})）；在 5% 档跑 Coverage≥0.9 的短线（2 数据集 × 2 骨干）。
+* **W2**：三图一表（5% 档）：覆盖/RMSE、λ–(C^*)、APB 前沿、顺序鲁棒；做“固定 p/贪吃/ε-control”对照。
+* **W3**：规则替换（BTSP vs Hebbian-EMA）、跨 ε 档（3/5/8%）扩展；撰写方法与相关工作，准备 rebuttal 口径与失败模式图例。
+
+---
+
+## 10. 结语
+
+**方案 v3 是对方案 v2 的“收束与抬升”**：它不依赖把 BTSP 写进损失，而是把 BTSP 作为**事件级记忆内核**来承载“可控遗忘”的系统闭环；通过**等预算合同**与**标准化主图**，把“经验调参问题”转化为“可计算、可控、可比”的工程。对照近年“预算化 OCL / PTM 简化 / 对偶受约束”的脉络，它既**对齐趋势**，又在“**误差作为被控量**+**事件级门控**+**资源可达**”上形成**清晰差异点**。([arXiv][1])
+
+---
+
+[1]: https://arxiv.org/html/2410.15143?utm_source=chatgpt.com "Budgeted Online Continual Learning by Adaptive Layer ..."
+[2]: https://openreview.net/forum?id=mrRbIcyouU&utm_source=chatgpt.com "Revisiting Class-Incremental Learning with Pre-Trained ..."
+[3]: https://neurips.cc/virtual/2024/poster/96124?utm_source=chatgpt.com "Slow and Fast Parameter-Efficient Tuning for Continual ..."
+[4]: https://openreview.net/forum?id=GicZtgSlJW&utm_source=chatgpt.com "Primal-Dual Continual Learning: Stability and Plasticity ..."
+[5]: https://openreview.net/pdf?id=P6aJ7BqYlc&utm_source=chatgpt.com "Exemplar-Free Generalized Analytic Continual Learning"
+[6]: https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2020.00007/full?utm_source=chatgpt.com "Controlled Forgetting: Targeted Stimulation and ..."
